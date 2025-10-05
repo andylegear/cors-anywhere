@@ -45,6 +45,11 @@ var server = cors_proxy.createServer({
 server.on('request', function(req, res) {
   var url = req.url;
   
+  // Safety check for undefined URL
+  if (!url || typeof url !== 'string') {
+    return; // Let normal processing handle it
+  }
+  
   // Check if this is an astrobuysell.com request
   if (url.includes('astrobuysell.com')) {
     // Extract target URL from CORS Anywhere path
