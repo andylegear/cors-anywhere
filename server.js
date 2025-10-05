@@ -22,8 +22,14 @@ var checkRateLimit = require('./lib/rate-limit')(process.env.CORSANYWHERE_RATELI
 // Set up proxy rotation for IP masking
 var proxyRotation = require('./lib/proxy-rotation');
 
+// Set up Cloudflare bypass handler
+var cloudflareHandler = require('./lib/cloudflare-handler');
+
 var cors_proxy = require('./lib/cors-anywhere');
-cors_proxy.createServer({
+var cors_proxy = require('./lib/cors-anywhere');
+
+// Create custom server with Puppeteer support
+var server = cors_proxy.createServer({
   originBlacklist: originBlacklist,
   originWhitelist: originWhitelist,
   requireHeader: ['origin', 'x-requested-with'],
@@ -68,6 +74,35 @@ cors_proxy.createServer({
   getProxyForUrl: function(url) {
     return proxyRotation.getNextProxy(url);
   },
-}).listen(port, host, function() {
+});
+
+// Add custom middleware to intercept Cloudflare-protected requests
+var originalListen = server.listen;
+server.listen = function(port, host, callback) {
+  // Add request interceptor for Puppeteer handling
+  server.on('request', function(req, res) {
+    var url = req.url;
+    
+    // Extract target URL from CORS Anywhere path
+    if (url.startsWith('/http://') || url.startsWith('/https://')) {
+      var targetUrl = url.substring(1); // Remove leading slash
+      
+      // Check if this should use Puppeteer
+      if (cloudflareHandler.shouldUsePuppeteer(targetUrl)) {
+        console.log('Intercepting Cloudflare request for Puppeteer handling: ' + targetUrl);
+        cloudflareHandler.handleCloudflareRequest(req, res, targetUrl);
+        return; // Don't continue to normal processing
+      }
+    }
+  });
+  
+  // Call original listen method
+  return originalListen.call(this, port, host, callback);
+};
+
+server.listen(port, host, function() {
   console.log('Running CORS Anywhere on ' + host + ':' + port);
+  if (process.env.USE_BROWSER_MODE === 'true') {
+    console.log('Puppeteer mode enabled for Cloudflare bypass');
+  }
 });
