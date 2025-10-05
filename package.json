@@ -29,8 +29,7 @@
   ],
   "dependencies": {
     "http-proxy": "1.11.1",
-    "proxy-from-env": "0.0.1",
-    "puppeteer": "^21.5.2"
+    "proxy-from-env": "0.0.1"
   },
   "devDependencies": {
     "coveralls": "^2.11.6",

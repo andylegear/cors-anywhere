@@ -19,13 +19,9 @@ function parseEnvList(env) {
 // Set up rate-limiting to avoid abuse of the public CORS Anywhere server.
 var checkRateLimit = require('./lib/rate-limit')(process.env.CORSANYWHERE_RATELIMIT);
 
-// Set up proxy rotation for IP masking
-var proxyRotation = require('./lib/proxy-rotation');
+// Set up simple Cloudflare bypass for free tier
+var simpleBypass = require('./lib/simple-bypass-v2');
 
-// Set up Cloudflare bypass handler
-var cloudflareHandler = require('./lib/cloudflare-handler');
-
-var cors_proxy = require('./lib/cors-anywhere');
 var cors_proxy = require('./lib/cors-anywhere');
 
 // Create custom server with Puppeteer support
@@ -70,10 +66,6 @@ var server = cors_proxy.createServer({
     // Do not add X-Forwarded-For, etc. headers, because Heroku already adds it.
     xfwd: false,
   },
-  // Custom proxy function for IP rotation
-  getProxyForUrl: function(url) {
-    return proxyRotation.getNextProxy(url);
-  },
 });
 
 // Add custom middleware to intercept Cloudflare-protected requests
@@ -87,11 +79,34 @@ server.listen = function(port, host, callback) {
     if (url.startsWith('/http://') || url.startsWith('/https://')) {
       var targetUrl = url.substring(1); // Remove leading slash
       
-      // Check if this should use Puppeteer
-      if (cloudflareHandler.shouldUsePuppeteer(targetUrl)) {
-        console.log('Intercepting Cloudflare request for Puppeteer handling: ' + targetUrl);
-        cloudflareHandler.handleCloudflareRequest(req, res, targetUrl);
-        return; // Don't continue to normal processing
+      // Check if this is astrobuysell.com (Cloudflare protected)
+      if (targetUrl.includes('astrobuysell.com')) {
+        console.log('Intercepting Cloudflare request for simple bypass: ' + targetUrl);
+        
+        // Use simple bypass instead of Puppeteer
+        simpleBypass.bypassCloudflare(targetUrl, function(error, response) {
+          if (error) {
+            console.error('Simple bypass failed:', error.message);
+            // Fall back to normal processing - don't return, let it continue
+          } else {
+            // Send response with CORS headers (remove content-encoding since we decompressed it)
+            var responseHeaders = Object.assign({
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+              'Access-Control-Allow-Headers': 'X-Requested-With, Content-Type, Authorization',
+              'Access-Control-Max-Age': '86400',
+            }, response.headers);
+            
+            // Remove encoding headers since we already decompressed the content
+            delete responseHeaders['content-encoding'];
+            delete responseHeaders['Content-Encoding'];
+            
+            res.writeHead(response.statusCode, responseHeaders);
+            res.end(response.content);
+            return; // Don't continue to normal processing
+          }
+        });
+        return; // Don't continue to normal processing while bypass is running
       }
     }
   });
@@ -102,7 +117,5 @@ server.listen = function(port, host, callback) {
 
 server.listen(port, host, function() {
   console.log('Running CORS Anywhere on ' + host + ':' + port);
-  if (process.env.USE_BROWSER_MODE === 'true') {
-    console.log('Puppeteer mode enabled for Cloudflare bypass');
-  }
+  console.log('Simple Cloudflare bypass enabled for free tier compatibility');
 });
